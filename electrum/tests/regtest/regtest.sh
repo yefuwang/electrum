@@ -2,11 +2,14 @@
 export HOME=~
 set -eu
 
-# alice -> bob -> carol
+# note: this script assumes that bitcoind and electrumx are already running.
 
 alice="./run_electrum --regtest --lightning -D /tmp/alice"
 bob="./run_electrum --regtest --lightning -D /tmp/bob"
 carol="./run_electrum --regtest --lightning -D /tmp/carol"
+
+dave_lnd="lnd --bitcoin.active --bitcoin.regtest --debuglevel=debug --bitcoin.node=bitcoind --bitcoind.rpchost=127.0.0.1:18554 --bitcoind.rpcuser=doggman --bitcoind.rpcpass=donkey --bitcoind.zmqpubrawblock=tcp://127.0.0.1:28332 --bitcoind.zmqpubrawtx=tcp://127.0.0.1:28333 --externalip=127.0.0.1:9738 --noseedbackup --lnddir=/tmp/dave --listen=9738 --rpclisten=10010 --restlisten=8081"
+dave_lncli="lncli -n regtest --lnddir=/tmp/dave --rpcserver localhost:10010"
 
 bitcoin_cli="bitcoin-cli -rpcuser=doggman -rpcpassword=donkey -rpcport=18554 -regtest"
 
@@ -22,6 +25,7 @@ fi
 
 if [[ $1 == "init" ]]; then
     rm -rf /tmp/alice/ /tmp/bob/ /tmp/carol/
+    # rm -rf /tmp/dave/
     $alice create > /dev/null
     $bob create > /dev/null
     $carol create > /dev/null
@@ -39,6 +43,8 @@ if [[ $1 == "start" ]]; then
     $alice daemon load_wallet
     $carol daemon -s 127.0.0.1:51001:t start
     $carol daemon load_wallet
+    #screen -S dave_lnd -X quit || true
+    #screen -S dave_lnd -m -d $dave_lnd
     sleep 10 # give time to synchronize
 fi
 
@@ -46,6 +52,7 @@ if [[ $1 == "stop" ]]; then
     $alice daemon stop || true
     $bob daemon stop || true
     $carol daemon stop || true
+    #$dave_lncli stop || true
 fi
 
 if [[ $1 == "open" ]]; then
@@ -187,4 +194,61 @@ if [[ $1 == "breach_with_htlc" ]]; then
 	echo "htlc not redeemed."
 	exit 1
     fi
+fi
+
+
+if [[ $1 == "pay_alice_dave_carol" ]]; then
+    # open channels
+    echo 'opening channels'
+    dave_node=$($dave_lncli getinfo | jq '.uris[0]')
+    channel_id1=$($alice open_channel $dave_node 0.05 --channel_push 0.05)
+    channel_id2=$($carol open_channel $dave_node 0.05 --channel_push 0.05)
+    echo 'mining 6 blocks'
+    new_blocks 6
+    sleep 10
+    # alice pays carol
+    echo 'alice pays carol 1'
+    invoice=$($carol addinvoice 0.0001 "test")
+    $alice lnpay $invoice || true
+    sleep 5
+    carol_balance=$($carol list_channels | jq -r '.[0].local_balance')
+    echo "carol balance: $carol_balance"
+    if [[ $carol_balance != 50010000 ]]; then
+        echo "failure"
+	    exit 1
+    fi
+    echo "success"
+fi
+
+
+if [[ $1 == "pay_alice_dave_carol_two_htlcs" ]]; then
+    # restart carol with "do not settle"
+#    $carol daemon stop
+#    ELECTRUM_DEBUG_LIGHTNING_DO_NOT_SETTLE=1 $carol daemon -s 127.0.0.1:51001:t start
+#    $carol daemon load_wallet
+#    sleep 1
+    # open channels
+    echo 'opening channels'
+    dave_node=$($dave_lncli getinfo | jq '.uris[0]')
+    channel_id1=$($alice open_channel $dave_node 0.05 --channel_push 0.05)
+    channel_id2=$($carol open_channel $dave_node 0.05 --channel_push 0.05)
+    echo 'mining 6 blocks'
+    new_blocks 6
+    sleep 10
+    # alice pays carol
+    echo 'alice pays carol 1'
+    invoice=$($carol addinvoice 0.01 "test")
+    $alice lnpay $invoice || true
+    sleep 5
+    # restart carol with normal settings
+    $carol daemon stop
+    $carol daemon -s 127.0.0.1:51001:t start
+    $carol daemon load_wallet
+    sleep 10
+    echo 'alice pays carol 2'
+    invoice=$($carol addinvoice 0.01 "test")
+    $alice lnpay $invoice || true
+
+    exit 22
+    # TODO
 fi

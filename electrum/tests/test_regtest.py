@@ -35,3 +35,6 @@ class TestLightning(unittest.TestCase):
 
     def test_breach_with_htlc(self):
         self.run_shell(['breach_with_htlc'])
+
+    #def test_pay_while_stuck_htlc(self):
+    #    self.run_shell(['pay_alice_dave_carol_two_htlcs'])
