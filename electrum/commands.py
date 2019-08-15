@@ -951,6 +951,7 @@ arg_types = {
     'fee_method': str,
     'fee_level': json_loads,
     'encrypt_file': eval_bool,
+    'timeout': float,
 }
 
 config_variables = {
